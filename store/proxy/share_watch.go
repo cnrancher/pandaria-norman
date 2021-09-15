@@ -20,9 +20,15 @@ func (s *Store) shareWatch(apiContext *types.APIContext, schema *types.Schema, o
 	}
 	s.Unlock()
 
+	// PANDARIA: add selector
+	watchOpt := &types.QueryOptions{}
+	if opt.Selector != "" {
+		watchOpt.Selector = opt.Selector
+	}
+
 	return b.Subscribe(apiContext.Request.Context(), func() (chan map[string]interface{}, error) {
 		newAPIContext := *apiContext
 		newAPIContext.Request = apiContext.Request.WithContext(s.close)
-		return s.realWatch(&newAPIContext, schema, &types.QueryOptions{})
+		return s.realWatch(&newAPIContext, schema, watchOpt) // PANDARIA: add selector
 	})
 }

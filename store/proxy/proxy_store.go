@@ -219,7 +219,7 @@ func (s *Store) List(apiContext *types.APIContext, schema *types.Schema, opt *ty
 	// if there are no namespaces field in options, a single request is made
 	if opt == nil || opt.Namespaces == nil {
 		ns := getNamespace(apiContext, opt)
-		list, err := s.retryList(ns, apiContext)
+		list, err := s.retryList(ns, apiContext, opt)
 		if err != nil {
 			return nil, err
 		}
@@ -234,7 +234,7 @@ func (s *Store) List(apiContext *types.APIContext, schema *types.Schema, opt *ty
 		for _, ns := range allNS {
 			nsCopy := ns
 			errGroup.Go(func() error {
-				list, err := s.retryList(nsCopy, apiContext)
+				list, err := s.retryList(nsCopy, apiContext, opt)
 				if err != nil {
 					return err
 				}
@@ -260,7 +260,7 @@ func (s *Store) List(apiContext *types.APIContext, schema *types.Schema, opt *ty
 	return apiContext.AccessControl.FilterList(apiContext, schema, result, s.authContext), nil
 }
 
-func (s *Store) retryList(namespace string, apiContext *types.APIContext) (*unstructured.UnstructuredList, error) {
+func (s *Store) retryList(namespace string, apiContext *types.APIContext, opt *types.QueryOptions) (*unstructured.UnstructuredList, error) {
 	var resultList *unstructured.UnstructuredList
 	k8sClient, err := s.k8sClient(apiContext)
 	if err != nil {
@@ -269,6 +269,13 @@ func (s *Store) retryList(namespace string, apiContext *types.APIContext) (*unst
 
 	for i := 0; i < 3; i++ {
 		req := s.common(namespace, k8sClient.Get())
+		// PANDARIA: add selector
+		if opt.Selector != "" {
+			logrus.Tracef("query selector: %v", opt.Selector)
+			req.VersionedParams(&metav1.ListOptions{
+				LabelSelector: opt.Selector,
+			}, metav1.ParameterCodec)
+		}
 		start := time.Now()
 		resultList = &unstructured.UnstructuredList{}
 		enableTrace := strings.EqualFold(os.Getenv("PANDARIA_NORMAN_GET_TRACE"), "true") ||
@@ -322,11 +329,16 @@ func (s *Store) realWatch(apiContext *types.APIContext, schema *types.Schema, op
 
 	timeout := int64(60 * 30)
 	req := s.common(namespace, k8sClient.Get())
-	req.VersionedParams(&metav1.ListOptions{
+	// PANDARIA: add selector
+	listOptions := &metav1.ListOptions{
 		Watch:           true,
 		TimeoutSeconds:  &timeout,
 		ResourceVersion: "0",
-	}, metav1.ParameterCodec)
+	}
+	if opt.Selector != "" {
+		listOptions.LabelSelector = opt.Selector
+	}
+	req.VersionedParams(listOptions, metav1.ParameterCodec)
 
 	body, err := req.Stream(s.close)
 	if err != nil {

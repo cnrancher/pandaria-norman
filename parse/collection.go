@@ -24,6 +24,7 @@ func QueryOptions(apiContext *types.APIContext, schema *types.Schema) types.Quer
 	result.Sort = parseSort(schema, apiContext)
 	result.Pagination = parsePagination(apiContext)
 	result.Conditions = parseFilters(schema, apiContext)
+	result.Selector = parseSelector(apiContext) // PANDARIA: parse selector
 
 	return *result
 }
@@ -109,4 +110,9 @@ func parseFilters(schema *types.Schema, apiContext *types.APIContext) []*types.Q
 	}
 
 	return conditions
+}
+
+func parseSelector(apiContext *types.APIContext) string {
+	q := apiContext.Query
+	return q.Get("selector")
 }

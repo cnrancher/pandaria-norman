@@ -205,6 +205,8 @@ type QueryOptions struct {
 	Options    map[string]string
 	// Set namespaces to an empty array will result in an empty response
 	Namespaces []string
+
+	Selector string `json:"selector,omitempty"` // PANDARIA: support labelSelector for query
 }
 
 type ReferenceValidator interface {
