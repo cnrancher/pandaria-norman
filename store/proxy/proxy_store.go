@@ -40,14 +40,7 @@ var (
 		userAuthHeader,
 		"Impersonate-Group",
 	}
-	paramScheme = runtime.NewScheme()                    // PANDARIA
-	paramCodec  = runtime.NewParameterCodec(paramScheme) // PANDARIA
 )
-
-func init() {
-	// PANDARIA
-	metav1.AddToGroupVersion(paramScheme, metav1.SchemeGroupVersion)
-}
 
 type ClientGetter interface {
 	UnversionedClient(apiContext *types.APIContext, context types.StorageContext) (rest.Interface, error)
@@ -591,8 +584,8 @@ func splitID(id string) (string, string) {
 
 func getDeleteOption(req *http.Request) (*metav1.DeleteOptions, error) {
 	options := &metav1.DeleteOptions{}
-
-	if err := paramCodec.DecodeParameters(req.URL.Query(), metav1.SchemeGroupVersion, options); err != nil {
+	values := req.URL.Query()
+	if err := metav1.Convert_url_Values_To_v1_DeleteOptions(&values, options, nil); err != nil {
 		return nil, err
 	}
 	prop := metav1.DeletePropagationBackground
