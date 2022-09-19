@@ -3,19 +3,28 @@ package cache
 import (
 	"context"
 	"fmt"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/rancher/lasso/pkg/client"
+	"github.com/rancher/lasso/pkg/log"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/tools/cache"
 )
 
+const (
+	// in minutes
+	resyncDefault = 600
+)
+
 type Options struct {
-	Namespace string
-	Resync    time.Duration
-	TweakList TweakListOptionsFunc
+	Namespace   string
+	Resync      time.Duration
+	TweakList   TweakListOptionsFunc
+	WaitHealthy func(ctx context.Context)
 }
 
 func NewCache(obj, listObj runtime.Object, client *client.Client, opts *Options) cache.SharedIndexInformer {
@@ -28,10 +37,11 @@ func NewCache(obj, listObj runtime.Object, client *client.Client, opts *Options)
 	opts = applyDefaultCacheOptions(opts)
 
 	lw := &deferredListWatcher{
-		client:    client,
-		tweakList: opts.TweakList,
-		namespace: opts.Namespace,
-		listObj:   listObj,
+		client:      client,
+		tweakList:   opts.TweakList,
+		namespace:   opts.Namespace,
+		listObj:     listObj,
+		waitHealthy: opts.WaitHealthy,
 	}
 
 	return &deferredCache{
@@ -51,12 +61,25 @@ func applyDefaultCacheOptions(opts *Options) *Options {
 		newOpts = *opts
 	}
 	if newOpts.Resync == 0 {
-		newOpts.Resync = 10 * time.Hour
+		newOpts.Resync = getDefaultResyncInterval()
 	}
 	if newOpts.TweakList == nil {
 		newOpts.TweakList = func(*metav1.ListOptions) {}
 	}
 	return &newOpts
+}
+
+func getDefaultResyncInterval() time.Duration {
+	cattleResyncDefaultFromEnv := os.Getenv("CATTLE_RESYNC_DEFAULT")
+	if cattleResyncDefaultFromEnv == "" {
+		return resyncDefault * time.Minute
+	}
+	resyncDefaultFromEnv, err := strconv.Atoi(cattleResyncDefaultFromEnv)
+	if err != nil {
+		log.Errorf("Lasso: Unable to use resync interval value [%s] from CATTLE_RESYNC_DEFAULT environment variable. Using default [%d].", cattleResyncDefaultFromEnv, resyncDefault)
+		return resyncDefault * time.Minute
+	}
+	return time.Duration(resyncDefaultFromEnv) * time.Minute
 }
 
 type deferredCache struct {
@@ -65,11 +88,12 @@ type deferredCache struct {
 }
 
 type deferredListWatcher struct {
-	lw        cache.ListerWatcher
-	client    *client.Client
-	tweakList TweakListOptionsFunc
-	namespace string
-	listObj   runtime.Object
+	lw          cache.ListerWatcher
+	client      *client.Client
+	tweakList   TweakListOptionsFunc
+	namespace   string
+	listObj     runtime.Object
+	waitHealthy func(ctx context.Context)
 }
 
 func (d *deferredListWatcher) List(options metav1.ListOptions) (runtime.Object, error) {
@@ -104,6 +128,9 @@ func (d *deferredListWatcher) run(stopCh <-chan struct{}) {
 			}
 			listObj := d.listObj.DeepCopyObject()
 			err := d.client.List(ctx, d.namespace, listObj, options)
+			if err != nil && d.waitHealthy != nil {
+				d.waitHealthy(ctx)
+			}
 			return listObj, err
 		},
 		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
