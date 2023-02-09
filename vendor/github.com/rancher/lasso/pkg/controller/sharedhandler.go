@@ -8,7 +8,10 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
+	"github.com/rancher/lasso/pkg/metrics"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
@@ -22,15 +25,16 @@ type handlerEntry struct {
 	handler SharedControllerHandler
 }
 
-type sharedHandler struct {
+type SharedHandler struct {
 	// keep first because arm32 needs atomic.AddInt64 target to be mem aligned
-	idCounter int64
+	idCounter     int64
+	controllerGVR string
 
-	lock     sync.Mutex
+	lock     sync.RWMutex
 	handlers []handlerEntry
 }
 
-func (h *sharedHandler) Register(ctx context.Context, name string, handler SharedControllerHandler) {
+func (h *SharedHandler) Register(ctx context.Context, name string, handler SharedControllerHandler) {
 	h.lock.Lock()
 	defer h.lock.Unlock()
 
@@ -56,21 +60,39 @@ func (h *sharedHandler) Register(ctx context.Context, name string, handler Share
 	}()
 }
 
-func (h *sharedHandler) OnChange(key string, obj runtime.Object) error {
+func (h *SharedHandler) OnChange(key string, obj runtime.Object) error {
 	var (
 		errs errorList
 	)
+	h.lock.RLock()
+	handlers := h.handlers
+	h.lock.RUnlock()
 
-	for _, handler := range h.handlers {
+	for _, handler := range handlers {
+		var hasError bool
+		reconcileStartTS := time.Now()
+
 		newObj, err := handler.handler.OnChange(key, obj)
 		if err != nil && !errors.Is(err, ErrIgnore) {
 			errs = append(errs, &handlerError{
 				HandlerName: handler.name,
 				Err:         err,
 			})
+			hasError = true
 		}
+		metrics.IncTotalHandlerExecutions(h.controllerGVR, handler.name, hasError)
+		reconcileTime := time.Since(reconcileStartTS)
+		metrics.ReportReconcileTime(h.controllerGVR, handler.name, hasError, reconcileTime.Seconds())
+
 		if newObj != nil && !reflect.ValueOf(newObj).IsNil() {
-			obj = newObj
+			meta, err := meta.Accessor(newObj)
+			if err == nil && meta.GetUID() != "" {
+				// avoid using an empty object
+				obj = newObj
+			} else if err != nil {
+				// assign if we can't determine metadata
+				obj = newObj
+			}
 		}
 	}
 

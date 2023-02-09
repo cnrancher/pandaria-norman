@@ -142,6 +142,11 @@ func (s *Store) getUser(apiContext *types.APIContext) string {
 }
 
 func (s *Store) doAuthed(apiContext *types.APIContext, request *rest.Request) rest.Result {
+	start := time.Now()
+	defer func() {
+		logrus.Tracef("GET: %v, %v", time.Since(start), s.resourcePlural)
+	}()
+
 	for _, header := range authHeaders {
 		request.SetHeader(header, apiContext.Request.Header[http.CanonicalHeaderKey(header)]...)
 	}

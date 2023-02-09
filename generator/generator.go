@@ -7,7 +7,6 @@ package generator
 import (
 	"bytes"
 	"fmt"
-	"io/ioutil"
 	"net/http"
 	"os"
 	"path"
@@ -499,7 +498,7 @@ func prepareDirs(dirs ...string) error {
 			return err
 		}
 
-		files, err := ioutil.ReadDir(dir)
+		files, err := os.ReadDir(dir)
 		if err != nil {
 			return err
 		}
@@ -517,12 +516,12 @@ func prepareDirs(dirs ...string) error {
 }
 
 func Gofmt(workDir, pkg string) error {
-	return filepath.Walk(filepath.Join(workDir, pkg), func(path string, info os.FileInfo, err error) error {
+	return filepath.Walk(filepath.Join(workDir, pkg), func(path string, info os.FileInfo, _ error) error {
 		if info.IsDir() {
 			return nil
 		}
 
-		content, err := ioutil.ReadFile(path)
+		content, err := os.ReadFile(path)
 		if err != nil {
 			return err
 		}
@@ -573,7 +572,7 @@ func generateFakes(k8sDir string, controllers []*types.Schema) error {
 		}
 		// create the file
 		filePath := path.Join(k8sDir, "fakes", "zz_generated_"+addUnderscore(controller.ID)+"_mock.go")
-		err = ioutil.WriteFile(filePath, out.Bytes(), 0644)
+		err = os.WriteFile(filePath, out.Bytes(), 0644)
 		if err != nil {
 			return err
 		}

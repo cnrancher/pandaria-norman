@@ -36,7 +36,7 @@ type sharedController struct {
 	sharedCacheFactory cache.SharedCacheFactory
 	controller         Controller
 	gvk                schema.GroupVersionKind
-	handler            *sharedHandler
+	handler            *SharedHandler
 	startLock          sync.Mutex
 	started            bool
 	startError         error
@@ -87,6 +87,10 @@ func (s *sharedController) Start(ctx context.Context, workers int) error {
 
 	if s.startError != nil || s.controller == nil {
 		return s.startError
+	}
+
+	if s.started {
+		return nil
 	}
 
 	if err := s.controller.Start(ctx, workers); err != nil {

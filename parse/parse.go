@@ -104,7 +104,7 @@ func Parse(rw http.ResponseWriter, req *http.Request, schemas *types.Schemas, ur
 		result.URLBuilder, err = urlbuilder.New(req, types.APIVersion{}, result.Schemas)
 		result.Type = "apiRoot"
 		result.Schema = result.Schemas.Schema(&builtin.Version, "apiRoot")
-		return result, nil
+		return result, err
 	}
 
 	result.URLBuilder, err = urlbuilder.New(req, *result.Version, result.Schemas)
@@ -170,9 +170,7 @@ func parseVersionAndSubContext(schemas *types.Schemas, escapedPath string) (*typ
 	}
 	version := &versions[0]
 
-	if strings.HasSuffix(escapedPath, "/") {
-		escapedPath = escapedPath[:len(escapedPath)-1]
-	}
+	escapedPath = strings.TrimSuffix(escapedPath, "/")
 
 	versionParts := strings.Split(version.Path, "/")
 	pp := strings.Split(escapedPath, "/")
@@ -296,7 +294,7 @@ func parseAction(url *url.URL) (string, string) {
 }
 
 func Body(req *http.Request) (map[string]interface{}, error) {
-	req.ParseMultipartForm(maxFormSize)
+	_ = req.ParseMultipartForm(maxFormSize)
 	if req.MultipartForm != nil {
 		return valuesToBody(req.MultipartForm.Value), nil
 	}

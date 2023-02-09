@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/rancher/lasso/pkg/client"
-
+	"github.com/rancher/lasso/pkg/metrics"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -20,9 +20,10 @@ type SharedCacheFactoryOptions struct {
 	DefaultNamespace string
 	DefaultTweakList TweakListOptionsFunc
 
-	KindResync    map[schema.GroupVersionKind]time.Duration
-	KindNamespace map[schema.GroupVersionKind]string
-	KindTweakList map[schema.GroupVersionKind]TweakListOptionsFunc
+	KindResync     map[schema.GroupVersionKind]time.Duration
+	KindNamespace  map[schema.GroupVersionKind]string
+	KindTweakList  map[schema.GroupVersionKind]TweakListOptionsFunc
+	HealthCallback func(healthy bool)
 }
 
 type sharedCacheFactory struct {
@@ -35,6 +36,7 @@ type sharedCacheFactory struct {
 	customNamespaces    map[schema.GroupVersionKind]string
 	customTweakList     map[schema.GroupVersionKind]TweakListOptionsFunc
 	sharedClientFactory client.SharedClientFactory
+	healthcheck         healthcheck
 
 	caches        map[schema.GroupVersionKind]cache.SharedIndexInformer
 	startedCaches map[schema.GroupVersionKind]bool
@@ -55,6 +57,9 @@ func NewSharedCachedFactory(sharedClientFactory client.SharedClientFactory, opts
 		caches:              map[schema.GroupVersionKind]cache.SharedIndexInformer{},
 		startedCaches:       map[schema.GroupVersionKind]bool{},
 		sharedClientFactory: sharedClientFactory,
+		healthcheck: healthcheck{
+			callback: opts.HealthCallback,
+		},
 	}
 
 	return factory
@@ -90,6 +95,10 @@ func (f *sharedCacheFactory) Start(ctx context.Context) error {
 	f.lock.Lock()
 	defer f.lock.Unlock()
 
+	if err := f.healthcheck.start(ctx, f.sharedClientFactory); err != nil {
+		return err
+	}
+
 	for informerType, informer := range f.caches {
 		if !f.startedCaches[informerType] {
 			go informer.Run(ctx.Done())
@@ -107,6 +116,7 @@ func (f *sharedCacheFactory) WaitForCacheSync(ctx context.Context) map[schema.Gr
 
 		informers := map[schema.GroupVersionKind]cache.SharedIndexInformer{}
 		for informerType, informer := range f.caches {
+			metrics.IncTotalCachedObjects(informerType.Group, informerType.Version, informerType.Kind, float64(len(informer.GetStore().List())))
 			if f.startedCaches[informerType] {
 				informers[informerType] = informer
 			}
@@ -183,9 +193,10 @@ func (f *sharedCacheFactory) ForResourceKind(gvr schema.GroupVersionResource, ki
 	client := f.sharedClientFactory.ForResourceKind(gvr, kind, namespaced)
 
 	cache := NewCache(obj, objList, client, &Options{
-		Namespace: namespace,
-		Resync:    resyncPeriod,
-		TweakList: tweakList,
+		Namespace:   namespace,
+		Resync:      resyncPeriod,
+		TweakList:   tweakList,
+		WaitHealthy: f.healthcheck.ensureHealthy,
 	})
 	f.caches[gvk] = cache
 
